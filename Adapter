@@ -1,0 +1,108 @@
+import ADDRESSES from '../../helpers/coreAssets.json';
+import { Chain } from "@defillama/sdk/build/general";
+import { BreakdownAdapter, FetchResultGeneric, BaseAdapter, FetchOptions } from "../../adapters/types";
+import { CHAIN } from "../../helpers/chains";
+import { getStartTimestamp } from "../../helpers/getStartTimestamp";
+import * as sdk from "@defillama/sdk";
+import { getGraphDimensions, DEFAULT_DAILY_VOLUME_FACTORY, DEFAULT_TOTAL_VOLUME_FIELD } from "../../helpers/getUniSubgraph";
+import request, { gql } from 'graphql-request';
+
+const addresses = {
+  ethereum: '0xf1224A483ad7F1E9aA46A8CE41229F32d7549A74',
+  polygon: [
+    '0xDE5aBE2837bc042397D80E37fb7b2C850a8d5a6C',
+    '0xdcdee0E7a58Bba7e305dB3Abc42F4887CE8EF729',
+    '0x95C9Bf235435b660AA69F519904C3F175Aab393d',
+    '0x2f209e5b67A33B8fE96E28f24628dF6Da301c8eB'
+  ],
+  arbitrum: '0x90CAF23eA7E507BB722647B0674e50D8d6468234',
+  bsc: '0xb1d6D10561D4e1792A7c6B336b0529e4bFb5Ea8F',
+  flare: [
+    '0xb06202aA3Fe7d85171fB7aA5f17011d17E63f382',
+    '0x582d9e838FE6cD9F8147C66A8f56A3FBE513a6A2'
+  ],
+  base: [
+    '0x2AeE87D75CD000583DAEC7A28db103B1c0c18b76',
+    '0xA2f56F8F74B7d04d61f281BE6576b6155581dcBA'
+  ]
+};
+
+const fetchTVL = (chain, addresses) => async ({ endTimestamp, getEndBlock }) => {
+  const balances = {};
+  const api = { call: sdk.api.abi.call, add: (key, balance) => balances[key] = (balances[key] || 0) + balance };
+  
+  if (Array.isArray(addresses)) {
+    for (const address of addresses) {
+      const balance = await api.call({
+        abi: 'erc20:balanceOf',
+        target: address,
+        params: [address],
+      });
+      api.add(address, balance.output);
+    }
+  } else {
+    const balance = await api.call({
+      abi: 'erc20:balanceOf',
+      target: addresses,
+      params: [addresses],
+    });
+    api.add(addresses, balance.output);
+  }
+
+  return balances;
+};
+
+const fetchVolume = (chain, addresses) => async ({ endTimestamp, getEndBlock }) => {
+  const volumes = {};
+  const api = { call: sdk.api.abi.call, add: (key, volume) => volumes[key] = (volumes[key] || 0) + volume };
+
+  if (Array.isArray(addresses)) {
+    for (const address of addresses) {
+      const volume = await api.call({
+        abi: 'erc20:totalSupply', // Placeholder ABI for volume fetching; update as needed
+        target: address,
+      });
+      api.add(address, volume.output);
+    }
+  } else {
+    const volume = await api.call({
+      abi: 'erc20:totalSupply', // Placeholder ABI for volume fetching; update as needed
+      target: addresses,
+    });
+    api.add(addresses, volume.output);
+  }
+
+  return volumes;
+};
+
+const createAdapter = (chain, addresses) => {
+  return {
+    fetch: async (options) => {
+      const tvl = await fetchTVL(chain, addresses)(options);
+      const volume = await fetchVolume(chain, addresses)(options);
+      return {
+        tvl,
+        volume,
+      };
+    },
+    start: getStartTimestamp({ endpoints: [], chain }),
+    meta: {
+      methodology: 'counts the number of tokens in specified contracts and calculates their volume',
+    },
+  };
+};
+
+const adapter: BreakdownAdapter = {
+  breakdown: {
+    v1: {
+      [CHAIN.ETHEREUM]: createAdapter(CHAIN.ETHEREUM, addresses.ethereum),
+      [CHAIN.POLYGON]: createAdapter(CHAIN.POLYGON, addresses.polygon),
+      [CHAIN.ARBITRUM]: createAdapter(CHAIN.ARBITRUM, addresses.arbitrum),
+      [CHAIN.BSC]: createAdapter(CHAIN.BSC, addresses.bsc),
+      [CHAIN.FLARE]: createAdapter(CHAIN.FLARE, addresses.flare),
+      [CHAIN.BASE]: createAdapter(CHAIN.BASE, addresses.base),
+    },
+  },
+};
+
+export default adapter;
